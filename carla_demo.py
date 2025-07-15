@@ -8,6 +8,8 @@ import os
 import cv2
 import numpy as np
 import fusion
+import sys
+from omegaconf import OmegaConf
 
 
 
@@ -16,7 +18,22 @@ import fusion
   # in world coordinates of the convex hull of all camera view
   # frustums in the dataset
   # ======================================================================================================== #
-ddir = 'carla_data/'
+
+def get_output_directory_from_config(config_path="../cfg/carla_exp.yaml"):
+    """Get the output directory from the config file."""
+    try:
+        cfg = OmegaConf.load(config_path)
+        if hasattr(cfg, 'experiment_results') and hasattr(cfg.experiment_results, 'output_directory'):
+            return cfg.experiment_results.output_directory
+        else:
+            print(f"Warning: No output directory found in config, using default")
+            return "../results/latest"
+    except Exception as e:
+        print(f"Warning: Could not load config file {config_path}: {e}")
+        return "../results/latest"
+
+# Get output directory from config
+ddir = get_output_directory_from_config()
 
 
 def calculate_carla_intrinsics(image_width, image_height, fov_degrees):
@@ -118,6 +135,7 @@ def fix_carla_camera_pose(carla_pose):
 
 
 if __name__ == "__main__":
+    print(f"Using output directory: {ddir}")
     print("Estimating voxel volume bounds...")
     n_imgs = 40  # Use more frames for good reconstruction
     skip = 20
