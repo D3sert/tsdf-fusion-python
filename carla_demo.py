@@ -23,6 +23,10 @@ def calculate_carla_intrinsics(image_width, image_height, fov_degrees):
     """
     Calculate camera intrinsics matrix from Carla camera parameters.
     
+    Based on Carla 9.15 documentation and working 7-scenes dataset comparison:
+    - 7-scenes: fx=fy=585 for 640x480 images
+    - This calculation should yield similar values for proper TSDF fusion
+    
     Args:
         image_width: Image width in pixels
         image_height: Image height in pixels  
@@ -52,13 +56,17 @@ def calculate_carla_intrinsics(image_width, image_height, fov_degrees):
         [0.0, 0.0, 1.0]
     ], dtype=np.float32)
     
+    print(f"Calculated focal length: {focal_length:.1f} (should be similar to 7-scenes: ~585)")
     return intrinsics
 
 
 def carla_depth_to_meters(depth_img, max_range_m=60.0):
     """
     Convert Carla depth image to depth in meters.
-    Carla encodes depth as RGB where depth = (R + G*256 + B*256*256) / (256^3 - 1) * 1000
+    
+    Based on Carla 9.15 official documentation:
+    depth = (R + G*256 + B*256*256) / (256^3 - 1) * 1000
+    
     Note: OpenCV loads images as BGR, so we need to handle channel ordering correctly.
     """
     # Ensure we're working with the right data type
@@ -67,11 +75,11 @@ def carla_depth_to_meters(depth_img, max_range_m=60.0):
     # Extract BGR channels (OpenCV format) and map to RGB for Carla formula
     b, g, r = bgr[..., 0], bgr[..., 1], bgr[..., 2]
     
-    # Apply Carla's depth encoding formula: (R + G*256 + B*256*256) / (256^3 - 1) * 1000
-    # Note: Using the BGR channels in the RGB formula order
+    # Apply Carla's official depth encoding formula
+    # (R + G*256 + B*256*256) / (256^3 - 1) * 1000
     normalized = (r + g * 256 + b * 256 * 256) / (256**3 - 1)
     
-    # Convert to meters
+    # Convert to meters (Carla formula already includes *1000 scaling)
     depth_m = normalized * 1000.0
     
     # Clamp to max range and set invalid depths to 0
@@ -82,26 +90,29 @@ def carla_depth_to_meters(depth_img, max_range_m=60.0):
 
 def fix_carla_camera_pose(carla_pose):
     """
-    Convert Carla's world-to-camera matrix to camera-to-world matrix
-    and fix coordinate system orientation.
+    Convert Carla's vehicle transformation matrix to camera-to-world matrix
+    with proper coordinate system alignment.
     
-    Carla provides world-to-camera transformation matrices, but TSDF fusion
-    expects camera-to-world matrices. Additionally, Carla's coordinate system
-    needs to be aligned with TSDF's expected orientation.
+    Carla vehicle transforms are camera-to-world but need coordinate system fixes:
+    - Carla uses UE4 coordinate system: X-forward, Y-right, Z-up
+    - TSDF fusion expects standard computer vision: X-right, Y-down, Z-forward
+    
+    The matrix from generate_carla_files.py is already camera-to-world,
+    but needs coordinate system transformation.
     """
-    # First invert the matrix to convert world-to-camera to camera-to-world
-    inverted_pose = np.linalg.inv(carla_pose)
-    
-    # Apply coordinate system transformation to fix Y-axis curvature
-    # Try Y negation to fix downward curvature during left turn
+    # Apply coordinate transformation from Carla (UE4) to TSDF (OpenCV)
+    # Carla: X-forward, Y-right, Z-up
+    # OpenCV: X-right, Y-down, Z-forward
+    # Transformation: [X_cv, Y_cv, Z_cv] = [Y_carla, -Z_carla, X_carla]
     coord_transform = np.array([
-        [ 1,  0,  0,  0],  
-        [ 0,  1,  0,  0],  
-        [ 0,  0,  1,  0],
+        [ 0,  0,  1,  0],  # X_cv = Z_carla (forward)
+        [ 1,  0,  0,  0],  # Y_cv = X_carla (right) 
+        [ 0, -1,  0,  0],  # Z_cv = -Y_carla (down)
         [ 0,  0,  0,  1]
     ], dtype=np.float32)
     
-    corrected_pose = inverted_pose @ coord_transform
+    # Apply coordinate transformation
+    corrected_pose = carla_pose @ coord_transform
     
     return corrected_pose
 
@@ -111,10 +122,11 @@ if __name__ == "__main__":
     n_imgs = 50  # Use more frames for good reconstruction
     
     # Calculate camera intrinsics from Carla configuration
-    # Your Carla config: 'image_size_x': '640', 'image_size_y': '480', 'fov': '90'
+    # From log.log: 'width': 640, 'height': 480, 'fov': 90
     cam_intr = calculate_carla_intrinsics(640, 480, 90.0)
     print("Calculated camera intrinsics:")
     print(cam_intr)
+    print(f"For comparison, 7-scenes uses fx=fy=585 for 640x480 images")
     
     vol_bnds = np.zeros((3,2))
     
@@ -153,23 +165,28 @@ if __name__ == "__main__":
             print(f"Current vol_bnds: {vol_bnds}")
     # ======================================================================================================== #
     
-    # Validate and clamp volume bounds to reasonable values
-    print(f"Raw volume bounds: {vol_bnds}")
+    # Use the computed volume bounds from view frustums (DON'T override them!)
+    print(f"Final volume bounds from view frustum estimation: {vol_bnds}")
     
-    # For Carla scenes, center the volume around the first camera position
-    first_pose = np.loadtxt(os.path.join(ddir, "matrix_step_0000.txt"))
-    camera_pos = first_pose[:3, 3]
-    print(f"First camera position: {camera_pos}")
-    
-    # Use a reasonable volume size (30m x 30m x 15m) centered on the first camera
-    half_size_x, half_size_y, half_size_z = 100.0, 100.0, 10.0
-    vol_bnds = np.array([
-        [camera_pos[0] - half_size_x, camera_pos[0] + half_size_x],
-        [camera_pos[1] - half_size_y, camera_pos[1] + half_size_y], 
-        [camera_pos[2] - 2.0, camera_pos[2] + half_size_z*2 - 2.0]  # Adjust Z to capture scene above ground
-    ], dtype=np.float32)
-    
-    print(f"Centered volume bounds: {vol_bnds}")
+    # Validate bounds are reasonable
+    vol_size = vol_bnds[:,1] - vol_bnds[:,0]
+    if np.any(vol_size <= 0) or np.any(vol_size > 500):  # Sanity check
+        print("WARNING: Volume bounds seem unreasonable, using fallback")
+        first_pose = np.loadtxt(os.path.join(ddir, "matrix_step_0000.txt"))
+        first_pose = fix_carla_camera_pose(first_pose)  # Apply coordinate fix
+        camera_pos = first_pose[:3, 3]
+        print(f"First camera position (after coord fix): {camera_pos}")
+        
+        # Reasonable fallback volume (50m x 50m x 20m)
+        half_size_x, half_size_y, half_size_z = 25.0, 25.0, 10.0
+        vol_bnds = np.array([
+            [camera_pos[0] - half_size_x, camera_pos[0] + half_size_x],
+            [camera_pos[1] - half_size_y, camera_pos[1] + half_size_y], 
+            [camera_pos[2] - 2.0, camera_pos[2] + half_size_z*2 - 2.0]
+        ], dtype=np.float32)
+        print(f"Using fallback volume bounds: {vol_bnds}")
+    else:
+        print(f"Using computed volume bounds: {vol_bnds}")
     
     # Calculate volume size for verification
     vol_size = vol_bnds[:,1] - vol_bnds[:,0]
