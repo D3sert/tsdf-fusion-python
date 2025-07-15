@@ -2,3 +2,4 @@ __pycache__
 *.ply
 data/
 carla_data/
+carla_data_old/
