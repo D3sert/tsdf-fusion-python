@@ -119,7 +119,8 @@ def fix_carla_camera_pose(carla_pose):
 
 if __name__ == "__main__":
     print("Estimating voxel volume bounds...")
-    n_imgs = 50  # Use more frames for good reconstruction
+    n_imgs = 40  # Use more frames for good reconstruction
+    skip = 20
     
     # Calculate camera intrinsics from Carla configuration
     # From log.log: 'width': 640, 'height': 480, 'fov': 90
@@ -130,7 +131,7 @@ if __name__ == "__main__":
     
     vol_bnds = np.zeros((3,2))
     
-    for i in range(n_imgs):
+    for i in range(skip,skip+n_imgs):
         # Read depth image and camera pose
         depth_path = os.path.join(ddir, "depth_step_%04d.png" % i)
         pose_path = os.path.join(ddir, "matrix_step_%04d.txt" % i)
@@ -159,10 +160,6 @@ if __name__ == "__main__":
         vol_bnds[:,0] = np.minimum(vol_bnds[:,0], np.amin(view_frust_pts, axis=1))
         vol_bnds[:,1] = np.maximum(vol_bnds[:,1], np.amax(view_frust_pts, axis=1))
         
-        # Debug: Print bounds for first few frames
-        if i < 3:
-            print(f"Frame {i}: bounds min={np.amin(view_frust_pts, axis=1)}, max={np.amax(view_frust_pts, axis=1)}")
-            print(f"Current vol_bnds: {vol_bnds}")
     # ======================================================================================================== #
     
     # Use the computed volume bounds from view frustums (DON'T override them!)
