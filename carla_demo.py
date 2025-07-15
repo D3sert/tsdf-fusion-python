@@ -134,7 +134,7 @@ if __name__ == "__main__":
     for i in range(skip,skip+n_imgs):
         # Read depth image and camera pose
         depth_path = os.path.join(ddir, "depth_step_%04d.png" % i)
-        pose_path = os.path.join(ddir, "matrix_step_%04d.txt" % i)
+        pose_path = os.path.join(ddir, "transform_step_%04d.txt" % i)
         
         # Check if files exist
         if not os.path.exists(depth_path):
@@ -169,7 +169,7 @@ if __name__ == "__main__":
     vol_size = vol_bnds[:,1] - vol_bnds[:,0]
     if np.any(vol_size <= 0) or np.any(vol_size > 500):  # Sanity check
         print("WARNING: Volume bounds seem unreasonable, using fallback")
-        first_pose = np.loadtxt(os.path.join(ddir, "matrix_step_0000.txt"))
+        first_pose = np.loadtxt(os.path.join(ddir, "transform_step_0000.txt"))
         first_pose = fix_carla_camera_pose(first_pose)  # Apply coordinate fix
         camera_pos = first_pose[:3, 3]
         print(f"First camera position (after coord fix): {camera_pos}")
@@ -210,7 +210,7 @@ if __name__ == "__main__":
         # Read RGB-D image and camera pose
         color_path = os.path.join(ddir, "rgb_step_%04d.png" % i)
         depth_path = os.path.join(ddir, "depth_step_%04d.png" % i)
-        pose_path = os.path.join(ddir, "matrix_step_%04d.txt" % i)
+        pose_path = os.path.join(ddir, "transform_step_%04d.txt" % i)
         
         # Check if all required files exist
         if not all(os.path.exists(p) for p in [color_path, depth_path, pose_path]):
